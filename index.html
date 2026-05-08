@@ -12,12 +12,15 @@ Los Del 12
     <meta name="theme-color" content="#030712">
     
     <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js');
-            });
-        }
-    </script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      // Usar './' asegura que busque el archivo en la misma carpeta
+      navigator.serviceWorker.register('./sw.js')
+        .then(reg => console.log('SW registrado con éxito'))
+        .catch(err => console.log('Error al registrar SW', err));
+    });
+  }
+</script>
 
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
