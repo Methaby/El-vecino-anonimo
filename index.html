@@ -1,0 +1,365 @@
+```html
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>El Vecino Anónimo</title>
+    
+    <!-- PWA Meta Tags -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#030712">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;600;900&display=swap');
+        :root { --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px); }
+        body { 
+            font-family: 'Outfit', sans-serif; 
+            background-color: #030712; 
+            color: #f3f4f6; 
+            touch-action: manipulation; 
+            -webkit-tap-highlight-color: transparent; 
+            overflow: hidden; 
+            height: 100vh;
+        }
+        .glass { background: rgba(31, 41, 55, 0.4); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); }
+        .btn-primary { background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); }
+        .animate-view { animation: fadeIn 0.3s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .timer-bar { transition: width 1s linear; }
+        .no-select { user-select: none; -webkit-user-select: none; }
+    </style>
+</head>
+<body class="flex flex-col items-center p-4 no-select">
+    <div id="app" class="w-full max-w-md bg-gray-950 rounded-[3rem] shadow-2xl overflow-hidden border border-gray-800 h-full flex flex-col relative">
+        
+        <!-- Botón de Instalación (Solo aparece si es posible instalar) -->
+        <div id="install-banner" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-50 w-[90%] glass p-4 rounded-2xl flex items-center justify-between border-red-500/30 border">
+            <div class="flex items-center gap-3">
+                <span class="text-2xl">📱</span>
+                <div class="flex flex-col">
+                    <span class="text-[10px] font-black uppercase text-red-500">App Disponible</span>
+                    <span class="text-xs font-bold">Instalar en el móvil</span>
+                </div>
+            </div>
+            <button onclick="triggerInstall()" class="bg-red-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase">Instalar</button>
+        </div>
+
+        <header class="pt-10 pb-4 text-center bg-gray-950/95">
+            <h1 class="text-2xl font-900 tracking-tighter uppercase italic leading-none">
+                EL VECINO <span class="text-red-500 block text-3xl">ANÓNIMO</span>
+            </h1>
+        </header>
+
+        <main id="main-content" class="flex-1 p-6 flex flex-col overflow-y-auto pb-24"></main>
+
+        <nav id="bottom-nav" class="absolute bottom-0 left-0 right-0 p-4 pb-6 flex justify-around border-t border-gray-800 bg-gray-950/95 backdrop-blur-xl z-20" style="padding-bottom: calc(1.5rem + var(--safe-area-inset-bottom))">
+            <button onclick="renderSetup()" class="flex flex-col items-center gap-1 opacity-100 transition-all active:scale-90">
+                <span class="text-2xl">🎮</span>
+                <span class="text-[10px] font-black uppercase">Jugar</span>
+            </button>
+            <button onclick="renderWordManager()" class="flex flex-col items-center gap-1 opacity-50 transition-all active:scale-90">
+                <span class="text-2xl">📂</span>
+                <span class="text-[10px] font-black uppercase">Packs</span>
+            </button>
+            <button onclick="resetApp()" class="flex flex-col items-center gap-1 opacity-30 text-red-500 active:scale-90">
+                <span class="text-2xl">🔄</span>
+                <span class="text-[10px] font-black uppercase">Reset</span>
+            </button>
+        </nav>
+    </div>
+
+    <script>
+        // --- LÓGICA DE INSTALACIÓN ---
+        let deferredPrompt;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            document.getElementById('install-banner').classList.remove('hidden');
+        });
+
+        async function triggerInstall() {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                const { outcome } = await deferredPrompt.userChoice;
+                if (outcome === 'accepted') {
+                    document.getElementById('install-banner').classList.add('hidden');
+                }
+                deferredPrompt = null;
+            }
+        }
+
+        // --- SERVICE WORKER ---
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').catch(() => {});
+        }
+
+        // --- AUDIO ENGINE ---
+        const AudioEngine = {
+            ctx: null,
+            init() { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); },
+            play(freqs, duration = 0.5, type = 'sine') {
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = type; osc.connect(gain); gain.connect(this.ctx.destination);
+                freqs.forEach((f, i) => osc.frequency.setValueAtTime(f, now + (i * 0.1)));
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+                osc.start(now); osc.stop(now + duration);
+            },
+            soundKillCitizen() { this.play([300, 200, 100], 0.6, 'sawtooth'); },
+            soundKillImpostor() { this.play([400, 600, 800, 1200], 0.8, 'square'); }
+        };
+
+        // --- DATOS ---
+        const RAW_CATEGORIES = {
+            "Cine": ["Batman", "Joker", "Titanic", "Avatar", "Inception", "Matrix", "Avengers", "Gladiador", "Dune", "Shrek", "Nemo", "Frozen", "Coco", "Star Wars", "Superman", "Spiderman", "Rocky", "Rambo", "Terminator", "Saw", "Scream", "Mulan", "Aladdin"],
+            "Objetos": ["Reloj", "Espejo", "Martillo", "Brújula", "Cámara", "Teléfono", "Laptop", "Mochila", "Guitarra", "Piano", "Silla", "Mesa", "Lámpara", "Sofá", "Cama", "Libro", "Tijeras", "Llave", "Botella", "Nevera", "Televisión", "Bicicleta", "Coche", "Avión"],
+            "Comida": ["Pizza", "Sushi", "Taco", "Paella", "Ramen", "Pasta", "Burguer", "Helado", "Churros", "Tortilla", "Ceviche", "Empanada", "Hummus", "Kebab", "Donut", "Muffin", "Tarta", "Arroz", "Lentejas", "Pollo", "Queso", "Chocolate", "Café", "Cerveza"],
+            "Animales": ["Perro", "Gato", "León", "Tigre", "Oso", "Lobo", "Zorro", "Elefante", "Jirafa", "Cebra", "Mono", "Gorila", "Panda", "Delfín", "Ballena", "Tiburón", "Pulpo", "Águila", "Loro", "Pingüino", "Serpiente", "Cocodrilo", "Caballo", "Vaca"],
+            "Viajes": ["España", "México", "Japón", "Italia", "Francia", "Brasil", "China", "India", "Egipto", "Rusia", "USA", "Madrid", "París", "Roma", "Londres", "Tokio", "Berlín", "Atenas", "Cairo", "Pekín", "Amazonas", "Everest", "Andes", "Pirineos"]
+        };
+
+        let gameData = {
+            players: JSON.parse(localStorage.getItem('va-players')) || [],
+            scores: JSON.parse(localStorage.getItem('va-scores')) || {},
+            wordPairs: JSON.parse(localStorage.getItem('va-custom')) || [],
+            settings: { avatar: 'MALE', vecinoInvisible: JSON.parse(localStorage.getItem('va-invisible')) || false, numImpostores: 1 },
+            current: null
+        };
+
+        const AVATARS = {
+            MALE: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" class="w-full h-full text-blue-400" stroke-width="2"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 10-16 0" stroke-linecap="round"/></svg>`,
+            FEMALE: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" class="w-full h-full text-pink-400" stroke-width="2"><path d="M12 11c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4z"/><path d="M12 13c-4 0-7 3-7 7v1h14v-1c0-4-3-7-7-7z"/></svg>`
+        };
+
+        function save() {
+            localStorage.setItem('va-players', JSON.stringify(gameData.players));
+            localStorage.setItem('va-scores', JSON.stringify(gameData.scores));
+            localStorage.setItem('va-custom', JSON.stringify(gameData.wordPairs));
+            localStorage.setItem('va-invisible', JSON.stringify(gameData.settings.vecinoInvisible));
+        }
+
+        // --- RENDERERS ---
+        function renderSetup() {
+            document.getElementById('bottom-nav').style.display = 'flex';
+            const content = document.getElementById('main-content');
+            content.innerHTML = `
+                <div class="animate-view space-y-6">
+                    <div class="flex flex-col items-center gap-4">
+                        <div class="flex gap-4">
+                            <button onclick="gameData.settings.avatar='MALE'; renderSetup()" class="w-16 h-16 p-4 rounded-2xl glass ${gameData.settings.avatar==='MALE'?'ring-4 ring-blue-500 bg-blue-500/10':''}">
+                                ${AVATARS.MALE}
+                            </button>
+                            <button onclick="gameData.settings.avatar='FEMALE'; renderSetup()" class="w-16 h-16 p-4 rounded-2xl glass ${gameData.settings.avatar==='FEMALE'?'ring-4 ring-pink-500 bg-pink-500/10':''}">
+                                ${AVATARS.FEMALE}
+                            </button>
+                        </div>
+                        <div class="flex gap-2 w-full">
+                            <input type="text" id="p-name" placeholder="Nombre..." class="flex-1 bg-gray-900 border border-gray-800 rounded-2xl px-5 py-4 text-white outline-none focus:border-red-500">
+                            <button onclick="addPlayer()" class="bg-white text-black w-14 rounded-2xl font-black text-2xl active:scale-90">+</button>
+                        </div>
+                    </div>
+
+                    <div class="glass p-5 rounded-[2rem] space-y-4">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-black uppercase text-gray-400 tracking-wider">Número de Vecinos</span>
+                            <select onchange="gameData.settings.numImpostores=parseInt(this.value)" class="bg-gray-800 text-white rounded-lg px-2 py-1 text-sm outline-none">
+                                <option value="1" ${gameData.settings.numImpostores===1?'selected':''}>1 Vecino</option>
+                                <option value="2" ${gameData.settings.numImpostores===2?'selected':''}>2 Vecinos</option>
+                            </select>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-black uppercase text-gray-400 tracking-wider">Modo Vecino Ciego</span>
+                            <input type="checkbox" ${gameData.settings.vecinoInvisible?'checked':''} onchange="gameData.settings.vecinoInvisible=this.checked; save()" class="accent-red-500 w-5 h-5">
+                        </div>
+                    </div>
+
+                    <div class="space-y-2 max-h-48 overflow-y-auto pr-1">
+                        ${gameData.players.map((p, i) => `
+                            <div class="flex items-center justify-between glass p-4 rounded-3xl animate-view border-l-4 ${p.avatar==='MALE'?'border-l-blue-500':'border-l-pink-500'}">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-6 h-6">${AVATARS[p.avatar]}</div>
+                                    <span class="font-black text-xs uppercase tracking-widest">${p.name}</span>
+                                    <span class="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full font-black">${gameData.scores[p.name] || 0}</span>
+                                </div>
+                                <button onclick="removePlayer(${i})" class="text-gray-500 p-2">✕</button>
+                            </div>
+                        `).reverse().join('')}
+                    </div>
+
+                    <button onclick="startRound()" class="w-full btn-primary py-5 rounded-[2rem] font-black uppercase tracking-widest transition-all active:scale-95 disabled:opacity-20" ${gameData.players.length < (gameData.settings.numImpostores + 2) ? 'disabled' : ''}>
+                        REPARTIR ROLES
+                    </button>
+                </div>
+            `;
+        }
+
+        function addPlayer() {
+            const input = document.getElementById('p-name');
+            const name = input.value.trim();
+            if(name && !gameData.players.find(p => p.name === name)) {
+                gameData.players.push({ name, avatar: gameData.settings.avatar });
+                if(!gameData.scores[name]) gameData.scores[name] = 0;
+                save(); renderSetup();
+            }
+            input.value = "";
+        }
+
+        function removePlayer(i) {
+            const realIdx = gameData.players.length - 1 - i;
+            gameData.players.splice(realIdx, 1);
+            save(); renderSetup();
+        }
+
+        function startRound() {
+            document.getElementById('bottom-nav').style.display = 'none';
+            const categories = Object.keys(RAW_CATEGORIES);
+            const cat = categories[Math.floor(Math.random() * categories.length)];
+            const pool = RAW_CATEGORIES[cat];
+            let wordA = pool[Math.floor(Math.random() * pool.length)];
+            let wordB; do { wordB = pool[Math.floor(Math.random() * pool.length)]; } while (wordB === wordA);
+
+            let roles = [...gameData.players].sort(() => Math.random() - 0.5).map(p => ({
+                ...p, role: 'CIUDADANO', word: wordA, color: 'text-blue-400', isAlive: true
+            }));
+
+            let impCount = Math.min(gameData.settings.numImpostores, roles.length - 2);
+            for(let i = 0; i < impCount; i++) {
+                roles[i].role = 'VECINO';
+                roles[i].word = gameData.settings.vecinoInvisible ? '???' : wordB;
+                roles[i].color = 'text-red-500';
+            }
+
+            gameData.current = { roles: roles.sort(() => Math.random() - 0.5), revIdx: 0, revealed: false, hint: cat, target: wordA.toLowerCase() };
+            renderReveal();
+        }
+
+        function renderReveal() {
+            const content = document.getElementById('main-content');
+            const player = gameData.current.roles[gameData.current.revIdx];
+            if(!player) { renderVoting(); return; }
+
+            content.innerHTML = `
+                <div class="animate-view flex-1 flex flex-col items-center justify-between py-6 text-center">
+                    <h2 class="text-4xl font-900 uppercase italic">${player.name}</h2>
+                    <div onclick="gameData.current.revealed=true; renderReveal()" class="w-full h-80 glass rounded-[3.5rem] flex flex-col items-center justify-center p-8 active:scale-95 cursor-pointer">
+                        ${gameData.current.revealed ? `<p class="text-5xl font-900 italic ${player.color}">${player.word}</p><p class="mt-4 text-xs text-gray-500 uppercase">Tema: ${gameData.current.hint}</p>` : `<div class="text-6xl mb-4">🤫</div><p class="text-[11px] font-black text-gray-500 tracking-widest">TOCA PARA REVELAR</p>`}
+                    </div>
+                    <button onclick="gameData.current.revealed=false; gameData.current.revIdx++; renderReveal()" class="w-full py-6 rounded-[2rem] font-black uppercase tracking-widest ${gameData.current.revealed ? 'bg-white text-black' : 'bg-gray-900 text-gray-700 pointer-events-none'}">CONTINUAR</button>
+                </div>
+            `;
+        }
+
+        function renderVoting() {
+            const content = document.getElementById('main-content');
+            const alive = gameData.current.roles.filter(r => r.isAlive);
+            const impsAlive = alive.filter(r => r.role === 'VECINO');
+            if(impsAlive.length === 0) { endGame('CIUDADANOS'); return; }
+            if(alive.length <= 2) { endGame('VECINO'); return; }
+
+            content.innerHTML = `
+                <div class="animate-view flex-1 flex flex-col">
+                    <h2 class="text-2xl font-black uppercase text-center mb-6">¿Quién es el Vecino?</h2>
+                    <div class="grid grid-cols-2 gap-3 overflow-y-auto">
+                        ${gameData.current.roles.map((p, i) => `
+                            <button onclick="${p.isAlive ? `handleKill(${i})` : ''}" class="glass p-5 rounded-[2.5rem] relative active:scale-95 ${p.isAlive ? '' : 'opacity-20 grayscale'}">
+                                <div class="w-10 h-10 mx-auto mb-2">${AVATARS[p.avatar]}</div>
+                                <div class="font-black text-[10px] uppercase truncate">${p.name}</div>
+                                ${!p.isAlive ? '<div class="absolute inset-0 flex items-center justify-center text-3xl">❌</div>' : ''}
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function handleKill(idx) {
+            const p = gameData.current.roles[idx];
+            p.isAlive = false;
+            if(p.role === 'VECINO') { AudioEngine.soundKillImpostor(); renderLastChance(p); } 
+            else { AudioEngine.soundKillCitizen(); renderDeathMsg(p); }
+        }
+
+        function renderDeathMsg(p) {
+            const content = document.getElementById('main-content');
+            content.innerHTML = `
+                <div class="animate-view flex-1 flex flex-col items-center justify-center text-center space-y-8">
+                    <div class="text-8xl">💀</div>
+                    <h2 class="text-3xl font-900 uppercase">${p.name} era Una Mansa Paloma</h2>
+                    <button onclick="renderVoting()" class="w-full bg-white text-black py-6 rounded-[2.2rem] font-black uppercase active:scale-95">Continuar</button>
+                </div>
+            `;
+        }
+
+        function renderLastChance(p) {
+            const content = document.getElementById('main-content');
+            let timeLeft = 30;
+            content.innerHTML = `
+                <div class="animate-view flex-1 flex flex-col items-center justify-center text-center space-y-6">
+                    <div class="w-full bg-gray-900 h-2 rounded-full overflow-hidden"><div id="timer-bar" class="h-full bg-red-500 timer-bar" style="width: 100%"></div></div>
+                    <h2 class="text-2xl font-900 uppercase">¡DESCUBIERTO!</h2>
+                    <p class="text-xs text-gray-500 uppercase">Adivina la palabra (<span id="timer-text">30</span>s)</p>
+                    <div class="w-full glass p-8 rounded-[3rem] space-y-4">
+                        <input type="text" id="final-guess" class="w-full bg-gray-950 border border-gray-800 rounded-2xl px-4 py-5 text-center text-xl font-black uppercase text-white outline-none">
+                        <button onclick="checkFinalGuess()" class="w-full btn-primary py-5 rounded-2xl font-black uppercase">CONFIRMAR</button>
+                    </div>
+                </div>
+            `;
+
+            gameData.current.timerInterval = setInterval(() => {
+                timeLeft--;
+                document.getElementById('timer-text').innerText = timeLeft;
+                document.getElementById('timer-bar').style.width = (timeLeft / 30 * 100) + '%';
+                if(timeLeft <= 0) { clearInterval(gameData.current.timerInterval); checkFinalGuess(); }
+            }, 1000);
+        }
+
+        function checkFinalGuess() {
+            clearInterval(gameData.current.timerInterval);
+            const val = document.getElementById('final-guess') ? document.getElementById('final-guess').value.trim().toLowerCase() : "";
+            if(val === gameData.current.target) endGame('VECINO');
+            else {
+                const aliveImps = gameData.current.roles.filter(r => r.isAlive && r.role === 'VECINO');
+                if(aliveImps.length > 0) renderVoting();
+                else endGame('CIUDADANOS');
+            }
+        }
+
+        function endGame(winner) {
+            const isVecino = (winner === 'VECINO');
+            gameData.current.roles.forEach(r => { if(r.role === (isVecino ? 'VECINO' : 'CIUDADANO')) gameData.scores[r.name] = (gameData.scores[r.name] || 0) + (isVecino ? 3 : 1); });
+            save();
+            document.getElementById('main-content').innerHTML = `
+                <div class="animate-view flex-1 flex flex-col items-center justify-between text-center py-4">
+                    <h2 class="text-5xl font-900 italic uppercase">VICTORIA <span class="${isVecino?'text-red-600':'text-blue-400'} block text-3xl">${winner}</span></h2>
+                    <button onclick="renderSetup()" class="w-full btn-primary py-6 rounded-[2.2rem] font-black uppercase">Siguiente Ronda</button>
+                </div>
+            `;
+        }
+
+        function renderWordManager() {
+            document.getElementById('main-content').innerHTML = `
+                <div class="animate-view space-y-4">
+                    <h2 class="text-xl font-900 uppercase italic">Mis Packs</h2>
+                    <div class="bg-gray-900 p-6 rounded-[2.5rem] space-y-4">
+                        <input type="text" id="wa" placeholder="Palabra Ciudadano" class="w-full bg-gray-950 border border-gray-800 rounded-2xl px-4 py-4 text-sm text-white"><input type="text" id="wb" placeholder="Palabra Vecino" class="w-full bg-gray-950 border border-gray-800 rounded-2xl px-4 py-4 text-sm text-white">
+                        <button onclick="addWord()" class="w-full bg-white text-black py-4 rounded-2xl font-black text-xs uppercase">GUARDAR</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function addWord() { const a = document.getElementById('wa').value.trim(); const b = document.getElementById('wb').value.trim(); if(a && b) { gameData.wordPairs.push({ a, b, hint: 'Custom' }); save(); renderWordManager(); } }
+        function resetApp() { if(confirm('¿Reiniciar todo?')) { localStorage.clear(); location.reload(); } }
+        window.onload = () => { AudioEngine.init(); renderSetup(); };
+    </script>
+</body>
+</html>
+
+```
